@@ -18,13 +18,16 @@ class MessageService:
         if not conversation:
             raise HTTPException(status_code=400, detail="Conversation does not exist.")
 
+        # create new message with user role and content from payload
         message = Message(conversation_id=conversation_id, role="user", content=payload["content"])
         self.session.add(message)
         self.session.commit()
         self.session.refresh(message)
 
+        # get the whole conversation history including latest message
         chat_history = self.get_chat_history(conversation_id)
 
+        # create llm response based on the conversation history and save it as a new message with assistant role
         ai_response_text = self.ai_service.generate_response(chat_history)
         assistant_message = Message(conversation_id=conversation_id, role="assistant", content=ai_response_text)
         self.session.add(assistant_message)
