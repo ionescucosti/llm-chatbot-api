@@ -1,9 +1,13 @@
+import logging
+
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from models.conversation import Conversation
 from models.message import Message
 from services.ai_service import AIService
+
+logger = logging.getLogger(__name__)
 
 
 class MessageService:
@@ -16,6 +20,7 @@ class MessageService:
         statement = select(Conversation).where(Conversation.id == conversation_id)
         conversation = self.session.exec(statement).first()
         if not conversation:
+            logger.warning("Conversation not found: id=%s", conversation_id)
             raise HTTPException(status_code=400, detail="Conversation does not exist.")
 
         # create new message with user role and content from payload
@@ -23,6 +28,7 @@ class MessageService:
         self.session.add(message)
         self.session.commit()
         self.session.refresh(message)
+        logger.info("Created user message id=%s conversation_id=%s", message.id, conversation_id)
 
         # get the whole conversation history including latest message
         chat_history = self.get_chat_history(conversation_id)
@@ -33,6 +39,7 @@ class MessageService:
         self.session.add(assistant_message)
         self.session.commit()
         self.session.refresh(assistant_message)
+        logger.info("Created assistant message id=%s conversation_id=%s", assistant_message.id, conversation_id)
 
         return assistant_message
 
