@@ -76,7 +76,7 @@ jobs:
         run: |
           response=$(curl -s http://localhost:8000/health)
           echo "Response: $response"
-          echo "$response" | grep -q "status" || exit 1
+          echo "$response" | grep -q "Health" || exit 1
           echo "✓ Health check passed"
 
       - name: Smoke test - root endpoint
