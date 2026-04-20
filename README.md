@@ -1,13 +1,16 @@
 # llm-chatbot-api
 
-`llm-chatbot-api` is a small FastAPI backend for managing chat conversations and messages. It stores conversation history in PostgreSQL through SQLModel and integrates with OpenAI for AI-powered responses.
+`llm-chatbot-api` is a FastAPI backend for managing chat conversations with AI-powered responses and RAG (Retrieval-Augmented Generation) capabilities. It stores conversation history in PostgreSQL, integrates with OpenAI for AI responses and embeddings, and uses ChromaDB for vector storage.
 
 ## What It Does
 
 - Creates and deletes conversations
 - Stores user and assistant messages per conversation
-- Exposes simple REST endpoints for health checks, conversations, and messages
-- Persists data in PostgreSQL
+- **RAG Document Ingestion**: Upload PDF, TXT, DOCX files for knowledge base
+- **Async Processing**: Background document processing with Celery
+- **Semantic Search**: Query uploaded documents using vector similarity
+- Exposes REST endpoints for health checks, conversations, messages, and documents
+- Persists data in PostgreSQL and ChromaDB
 
 ## Tech Stack
 
@@ -15,6 +18,10 @@
 - FastAPI
 - SQLModel + SQLAlchemy
 - PostgreSQL + Psycopg
+- **ChromaDB** (vector database)
+- **Celery + Redis** (async task queue)
+- **OpenAI Embeddings** (text-embedding-3-small)
+- **PyPDF + python-docx** (document parsing)
 - Docker & Docker Compose
 - GitHub Actions for CI
 - `uv` for dependency management
@@ -27,10 +34,34 @@
 .
 ├── .github/workflows/  # CI/CD workflows
 ├── api/                # FastAPI route handlers
-├── database/           # Database engine and session wiring
+│   ├── routes_conversations.py
+│   ├── routes_documents.py    # NEW: Document upload & search
+│   ├── routes_health.py
+│   └── routes_messages.py
+├── core/               # Configuration and utilities
+│   ├── celery_app.py          # NEW: Celery configuration
+│   ├── config.py
+│   ├── prompts.py
+│   └── text_splitter.py       # NEW: Custom text chunking
+├── database/           # Database connections
+│   ├── chroma.py              # NEW: ChromaDB client
+│   └── db.py                  # PostgreSQL engine
 ├── models/             # SQLModel table definitions
+│   ├── conversation.py
+│   ├── document.py            # NEW: Document model
+│   └── message.py
 ├── schemas/            # Request and response schemas
-├── services/           # Business logic and AI integration
+│   ├── conversation.py
+│   ├── document.py            # NEW: Document schemas
+│   └── message.py
+├── services/           # Business logic
+│   ├── ai_service.py
+│   ├── conversation_service.py
+│   ├── document_service.py    # NEW: Document CRUD
+│   ├── embedding_service.py   # NEW: Text extraction & embeddings
+│   └── message_service.py
+├── workers/            # NEW: Background tasks
+│   └── tasks.py               # Celery tasks
 ├── tests/              # Unit and endpoint tests
 ├── main.py             # FastAPI application entrypoint
 ├── Dockerfile
@@ -50,15 +81,17 @@ cp .env.example .env
 # Edit .env and set your OPENAI_API_KEY
 ```
 
-2. Start the services:
+2. Start all services:
 
 ```bash
 docker compose up -d
 ```
 
 This starts:
-- PostgreSQL database on port 5432
-- API server on port 8000
+- **PostgreSQL** database on port 5432
+- **Redis** for Celery task queue on port 6379
+- **API server** on port 8000
+- **Celery worker** for async document processing
 
 The API will be available at `http://localhost:8000`.
 
@@ -76,16 +109,22 @@ Install dev dependencies as well:
 uv sync --dev
 ```
 
-Start PostgreSQL (via Docker):
+Start PostgreSQL and Redis (via Docker):
 
 ```bash
-docker compose up -d db
+docker compose up -d db redis
 ```
 
 Run the development server:
 
 ```bash
 uv run fastapi dev main.py
+```
+
+Start the Celery worker (in a separate terminal):
+
+```bash
+uv run celery -A core.celery_app worker --loglevel=info
 ```
 
 The API will be available at `http://127.0.0.1:8000`.
@@ -143,6 +182,7 @@ tests/
 ├── test_routes_health.py          # Health endpoint tests
 ├── test_routes_conversations.py   # Conversation endpoint tests
 ├── test_routes_messages.py        # Message endpoint tests
+├── test_routes_documents.py       # Document upload & search tests
 ├── test_conversation_service.py   # ConversationService unit tests
 └── test_message_service.py        # MessageService unit tests
 ```
@@ -240,16 +280,243 @@ Request body:
 - `GET /conversations/{c_id}/messages/{m_id}`
   Fetches a message by id for a given conversation.
 
+### Documents (RAG)
+
+#### Upload Document
+
+- `POST /documents/upload`
+  Upload a document for RAG processing. Supports PDF, TXT, and DOCX files up to 10MB.
+
+Request: `multipart/form-data` with `file` field.
+
+```bash
+curl -X POST "http://localhost:8000/documents/upload" \
+  -F "file=@document.pdf"
+```
+
+Response (202 Accepted):
+
+```json
+{
+  "id": 1,
+  "filename": "document.pdf",
+  "status": "pending",
+  "message": "Document queued for processing"
+}
+```
+
+#### Get Document Status
+
+- `GET /documents/{doc_id}/status`
+  Check the processing status of a document.
+
+Response:
+
+```json
+{
+  "id": 1,
+  "filename": "document.pdf",
+  "status": "completed",
+  "chunk_count": 42,
+  "error_message": null,
+  "created_at": "2024-01-15T10:30:00Z",
+  "completed_at": "2024-01-15T10:31:15Z"
+}
+```
+
+**Status values:**
+- `pending` - Document queued for processing
+- `processing` - Text extraction and embedding in progress
+- `completed` - Document successfully processed
+- `failed` - Processing failed (see `error_message`)
+
+#### List Documents
+
+- `GET /documents`
+  List all uploaded documents.
+
+Response:
+
+```json
+{
+  "documents": [
+    {
+      "id": 1,
+      "filename": "document.pdf",
+      "status": "completed",
+      "chunk_count": 42,
+      "error_message": null,
+      "created_at": "2024-01-15T10:30:00Z",
+      "completed_at": "2024-01-15T10:31:15Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+#### Delete Document
+
+- `DELETE /documents/{doc_id}`
+  Delete a document and its chunks from the vector database.
+
+Response: `204 No Content`
+
+#### Search Documents
+
+- `POST /documents/search`
+  Semantic search across all uploaded documents.
+
+Request body:
+
+```json
+{
+  "query": "How do I configure the application?",
+  "top_k": 5
+}
+```
+
+Response:
+
+```json
+{
+  "query": "How do I configure the application?",
+  "results": [
+    {
+      "content": "To configure the application, edit the .env file...",
+      "score": 0.92,
+      "document_id": 1,
+      "document_filename": "setup-guide.pdf",
+      "chunk_index": 3
+    }
+  ],
+  "total": 1
+}
+```
+
+## RAG Document Processing Flow
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  POST /upload   │────▶│  Create Record  │────▶│  Queue Celery   │
+│  (API)          │     │  status=pending │     │  Task           │
+└─────────────────┘     └─────────────────┘     └────────┬────────┘
+                                                         │
+                        ┌────────────────────────────────┘
+                        ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Celery Worker  │────▶│  Extract Text   │────▶│  Chunk Text     │
+│  Picks Up Task  │     │  (PDF/TXT/DOCX) │     │  (1000 chars)   │
+└─────────────────┘     └─────────────────┘     └────────┬────────┘
+                                                         │
+                        ┌────────────────────────────────┘
+                        ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Generate       │────▶│  Store in       │────▶│  Update Status  │
+│  Embeddings     │     │  ChromaDB       │     │  status=complete│
+│  (OpenAI)       │     │                 │     │                 │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+```
+
+### Processing Details
+
+- **Text Extraction**: PyPDF for PDFs, python-docx for DOCX, UTF-8 decode for TXT
+- **Chunking**: Custom `RecursiveTextSplitter` with 1000 character chunks and 200 character overlap
+- **Embeddings**: OpenAI `text-embedding-3-small` model (1536 dimensions)
+- **Vector Storage**: ChromaDB with cosine similarity
+- **Deduplication**: SHA-256 file hash prevents duplicate uploads
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | OpenAI API key (required) | - |
+| `DATABASE_URL` | PostgreSQL connection URL (required) | - |
+| `REDIS_URL` | Redis connection URL for Celery | `redis://localhost:6379/0` |
+| `CHROMA_PERSIST_DIR` | ChromaDB persistence directory | `./chroma_data` |
+| `CHROMA_COLLECTION_NAME` | ChromaDB collection name | `documents` |
+| `EMBEDDING_MODEL` | OpenAI embedding model | `text-embedding-3-small` |
+| `MAX_FILE_SIZE_MB` | Maximum upload file size | `10` |
+| `OPENAI_MODEL` | OpenAI chat model | `gpt-4.1-mini` |
+| `ASSISTANT_MODE` | Assistant personality mode | `general` |
+| `DEFAULT_LANGUAGE` | Default response language | `en` |
+
+### Example `.env` file
+
+```env
+OPENAI_API_KEY=sk-...
+DATABASE_URL=postgresql+psycopg://chatbot:chatbot@localhost:5432/chatbot
+REDIS_URL=redis://localhost:6379/0
+CHROMA_PERSIST_DIR=./chroma_data
+MAX_FILE_SIZE_MB=10
+```
+
 ## Current Behavior
 
 - Tables are created automatically on application startup.
-- The AI integration is currently a stub in `services/ai_service.py`.
+- The AI integration uses OpenAI's API for chat completions.
 - Conversation titles must be unique.
 - Message creation stores both the user message and the generated assistant reply.
+- **Document uploads are processed asynchronously** via Celery workers.
+- **Duplicate documents** (same content hash) are rejected with 409 Conflict.
+- **Supported file types**: PDF, TXT, DOCX (max 10MB by default).
+- **ChromaDB** persists vector data to disk for durability.
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                         Client                                │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    FastAPI Application                        │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐   │
+│  │ Conversations│  │  Messages   │  │     Documents       │   │
+│  │   Router    │  │   Router    │  │      Router         │   │
+│  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘   │
+│         │                │                     │              │
+│  ┌──────┴──────┐  ┌──────┴──────┐  ┌──────────┴──────────┐   │
+│  │ Conversation│  │   Message   │  │    Document         │   │
+│  │  Service    │  │   Service   │  │    Service          │   │
+│  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘   │
+└─────────┼────────────────┼────────────────────┼──────────────┘
+          │                │                    │
+          ▼                ▼                    ▼
+┌─────────────────┐  ┌─────────────┐  ┌─────────────────────┐
+│   PostgreSQL    │  │   OpenAI    │  │   Celery + Redis    │
+│   (SQLModel)    │  │    API      │  │   (Async Tasks)     │
+└─────────────────┘  └─────────────┘  └──────────┬──────────┘
+                                                 │
+                                                 ▼
+                                      ┌─────────────────────┐
+                                      │  Embedding Service  │
+                                      │  ┌───────────────┐  │
+                                      │  │ Text Extract  │  │
+                                      │  │ Chunking      │  │
+                                      │  │ Embeddings    │  │
+                                      │  └───────┬───────┘  │
+                                      └──────────┼──────────┘
+                                                 │
+                                                 ▼
+                                      ┌─────────────────────┐
+                                      │     ChromaDB        │
+                                      │  (Vector Storage)   │
+                                      └─────────────────────┘
+```
 
 ## Notes
 
 - Data is stored in a PostgreSQL database.
+- Vector embeddings are stored in ChromaDB with persistence.
 - Interactive API docs are available at `/docs` when the server is running.
 - Ruff configuration lives in `pyproject.toml`.
 - Pre-commit hooks are defined in `.pre-commit-config.yaml`.
+- Celery tasks are defined in `workers/tasks.py`.
+- Document processing happens asynchronously - poll `/documents/{id}/status` for progress.
+
+## License
+
+MIT

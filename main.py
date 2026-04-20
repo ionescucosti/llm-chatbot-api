@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlmodel import SQLModel
 
 from api.routes_conversations import router as conversation_router
+from api.routes_documents import router as document_router
 from api.routes_health import router as health_router
 from api.routes_messages import router as message_router
 from database.db import engine
@@ -45,3 +46,4 @@ def read_root():
 app.include_router(health_router)
 app.include_router(conversation_router)
 app.include_router(message_router)
+app.include_router(document_router)
