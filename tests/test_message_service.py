@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
-from models.conversation import Conversation
+from models.conversation import Conversation, ConversationMode
 from models.message import Message
 from schemas.message import MessageCreate
 from services.message_service import MessageService
@@ -15,8 +15,12 @@ from services.message_service import MessageService
 class TestMessageService:
     """Test suite for MessageService."""
 
+    @patch("services.message_service.ToolsService")
+    @patch("services.message_service.RAGService")
     @patch("services.message_service.AIService")
-    def test_create_message(self, mock_ai_class: MagicMock, session: Session):
+    def test_create_message(
+        self, mock_ai_class: MagicMock, mock_rag_class: MagicMock, mock_tools_class: MagicMock, session: Session
+    ):
         """Test creating a message with AI response."""
         # Setup mock
         mock_ai_instance = mock_ai_class.return_value
@@ -39,8 +43,64 @@ class TestMessageService:
         assert result.conversation_id == conversation.id
         mock_ai_instance.generate_response.assert_called_once()
 
+    @patch("services.message_service.ToolsService")
+    @patch("services.message_service.RAGService")
     @patch("services.message_service.AIService")
-    def test_create_message_saves_user_message(self, mock_ai_class: MagicMock, session: Session):
+    def test_create_message_rag_mode(
+        self, mock_ai_class: MagicMock, mock_rag_class: MagicMock, mock_tools_class: MagicMock, session: Session
+    ):
+        """Test creating a message with RAG mode."""
+        # Setup mock
+        mock_rag_instance = mock_rag_class.return_value
+        mock_rag_instance.generate_response.return_value = "RAG response!"
+
+        # Create a conversation with RAG mode
+        conversation = Conversation(title="RAG Conversation", mode=ConversationMode.RAG)
+        session.add(conversation)
+        session.commit()
+        session.refresh(conversation)
+
+        service = MessageService(session)
+        message_data = MessageCreate(content="Search something")
+
+        result = service.create_message(conversation.id, message_data)
+
+        assert result.role == "assistant"
+        assert result.content == "RAG response!"
+        mock_rag_instance.generate_response.assert_called_once()
+
+    @patch("services.message_service.ToolsService")
+    @patch("services.message_service.RAGService")
+    @patch("services.message_service.AIService")
+    def test_create_message_tools_mode(
+        self, mock_ai_class: MagicMock, mock_rag_class: MagicMock, mock_tools_class: MagicMock, session: Session
+    ):
+        """Test creating a message with tools mode."""
+        # Setup mock
+        mock_tools_instance = mock_tools_class.return_value
+        mock_tools_instance.generate_response.return_value = "Tools response!"
+
+        # Create a conversation with tools mode
+        conversation = Conversation(title="Tools Conversation", mode=ConversationMode.TOOLS)
+        session.add(conversation)
+        session.commit()
+        session.refresh(conversation)
+
+        service = MessageService(session)
+        message_data = MessageCreate(content="What time is it?")
+
+        result = service.create_message(conversation.id, message_data)
+
+        assert result.role == "assistant"
+        assert result.content == "Tools response!"
+        mock_tools_instance.generate_response.assert_called_once()
+
+    @patch("services.message_service.ToolsService")
+    @patch("services.message_service.RAGService")
+    @patch("services.message_service.AIService")
+    def test_create_message_saves_user_message(
+        self, mock_ai_class: MagicMock, mock_rag_class: MagicMock, mock_tools_class: MagicMock, session: Session
+    ):
         """Test that user message is also saved to database."""
         mock_ai_instance = mock_ai_class.return_value
         mock_ai_instance.generate_response.return_value = "AI response"
@@ -62,8 +122,12 @@ class TestMessageService:
         assert messages[0].content == "User message"
         assert messages[1].role == "assistant"
 
+    @patch("services.message_service.ToolsService")
+    @patch("services.message_service.RAGService")
     @patch("services.message_service.AIService")
-    def test_create_message_conversation_not_found(self, mock_ai_class: MagicMock, session: Session):
+    def test_create_message_conversation_not_found(
+        self, mock_ai_class: MagicMock, mock_rag_class: MagicMock, mock_tools_class: MagicMock, session: Session
+    ):
         """Test creating message for non-existent conversation raises HTTPException."""
         service = MessageService(session)
         message_data = MessageCreate(content="Hello")
@@ -74,8 +138,12 @@ class TestMessageService:
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail == "Conversation does not exist."
 
+    @patch("services.message_service.ToolsService")
+    @patch("services.message_service.RAGService")
     @patch("services.message_service.AIService")
-    def test_get_message(self, mock_ai_class: MagicMock, session: Session):
+    def test_get_message(
+        self, mock_ai_class: MagicMock, mock_rag_class: MagicMock, mock_tools_class: MagicMock, session: Session
+    ):
         """Test getting an existing message."""
         # Create conversation and message
         conversation = Conversation(title="Test")
@@ -95,8 +163,12 @@ class TestMessageService:
         assert result.content == "Test message"
         assert result.role == "user"
 
+    @patch("services.message_service.ToolsService")
+    @patch("services.message_service.RAGService")
     @patch("services.message_service.AIService")
-    def test_get_message_conversation_not_found(self, mock_ai_class: MagicMock, session: Session):
+    def test_get_message_conversation_not_found(
+        self, mock_ai_class: MagicMock, mock_rag_class: MagicMock, mock_tools_class: MagicMock, session: Session
+    ):
         """Test getting message from non-existent conversation raises HTTPException."""
         service = MessageService(session)
 
@@ -106,8 +178,12 @@ class TestMessageService:
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail == "Conversation not found"
 
+    @patch("services.message_service.ToolsService")
+    @patch("services.message_service.RAGService")
     @patch("services.message_service.AIService")
-    def test_get_chat_history(self, mock_ai_class: MagicMock, session: Session):
+    def test_get_chat_history(
+        self, mock_ai_class: MagicMock, mock_rag_class: MagicMock, mock_tools_class: MagicMock, session: Session
+    ):
         """Test getting chat history for a conversation."""
         # Create conversation
         conversation = Conversation(title="Chat History Test")
@@ -130,8 +206,12 @@ class TestMessageService:
         assert history[1] == {"role": "assistant", "content": "Hi there!"}
         assert history[2] == {"role": "user", "content": "How are you?"}
 
+    @patch("services.message_service.ToolsService")
+    @patch("services.message_service.RAGService")
     @patch("services.message_service.AIService")
-    def test_get_chat_history_conversation_not_found(self, mock_ai_class: MagicMock, session: Session):
+    def test_get_chat_history_conversation_not_found(
+        self, mock_ai_class: MagicMock, mock_rag_class: MagicMock, mock_tools_class: MagicMock, session: Session
+    ):
         """Test getting chat history for non-existent conversation raises HTTPException."""
         service = MessageService(session)
 
@@ -141,8 +221,12 @@ class TestMessageService:
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail == "Conversation not found"
 
+    @patch("services.message_service.ToolsService")
+    @patch("services.message_service.RAGService")
     @patch("services.message_service.AIService")
-    def test_get_chat_history_empty(self, mock_ai_class: MagicMock, session: Session):
+    def test_get_chat_history_empty(
+        self, mock_ai_class: MagicMock, mock_rag_class: MagicMock, mock_tools_class: MagicMock, session: Session
+    ):
         """Test getting chat history for conversation with no messages."""
         conversation = Conversation(title="Empty Conversation")
         session.add(conversation)

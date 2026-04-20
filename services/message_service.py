@@ -3,9 +3,11 @@ import logging
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
-from models.conversation import Conversation
+from models.conversation import Conversation, ConversationMode
 from models.message import Message
 from services.ai_service import AIService
+from services.rag_service import RAGService
+from services.tools_service import ToolsService
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +16,8 @@ class MessageService:
     def __init__(self, session: Session):
         self.session = session
         self.ai_service = AIService()
+        self.rag_service = RAGService()
+        self.tools_service = ToolsService()
 
     def create_message(self, conversation_id, message_data):
         payload = message_data.model_dump(by_alias=False)
@@ -33,8 +37,9 @@ class MessageService:
         # get the whole conversation history including latest message
         chat_history = self.get_chat_history(conversation_id)
 
-        # create llm response based on the conversation history and save it as a new message with assistant role
-        ai_response_text = self.ai_service.generate_response(chat_history)
+        # Route to the appropriate service based on conversation mode
+        ai_response_text = self._generate_response_by_mode(conversation.mode, chat_history)
+
         assistant_message = Message(conversation_id=conversation_id, role="assistant", content=ai_response_text)
         self.session.add(assistant_message)
         self.session.commit()
@@ -42,6 +47,17 @@ class MessageService:
         logger.info("Created assistant message id=%s conversation_id=%s", assistant_message.id, conversation_id)
 
         return assistant_message
+
+    def _generate_response_by_mode(self, mode: ConversationMode, chat_history: list[dict]) -> str:
+        """Route to the appropriate service based on conversation mode."""
+        logger.info("Generating response using mode=%s", mode)
+
+        if mode == ConversationMode.RAG:
+            return self.rag_service.generate_response(chat_history)
+        elif mode == ConversationMode.TOOLS:
+            return self.tools_service.generate_response(chat_history)
+        else:  # ConversationMode.PLAIN (default)
+            return self.ai_service.generate_response(chat_history)
 
     def get_message(self, conversation_id, message_id):
         conversation = self.session.get(Conversation, conversation_id)
