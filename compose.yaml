@@ -17,6 +17,20 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: chatbot-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
     build: .
     container_name: chatbot-api
@@ -27,10 +41,36 @@ services:
       - DATABASE_URL=postgresql+psycopg://chatbot:chatbot@db:5432/chatbot
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - DEFAULT_LANGUAGE=en
+      - REDIS_URL=redis://redis:6379/0
+      - CHROMA_PERSIST_DIR=/app/chroma_data
+    volumes:
+      - chroma_data:/app/chroma_data
     depends_on:
       db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-worker:
+    build: .
+    container_name: chatbot-celery-worker
+    restart: unless-stopped
+    command: ["uv", "run", "celery", "-A", "core.celery_app", "worker", "--loglevel=info"]
+    environment:
+      - DATABASE_URL=postgresql+psycopg://chatbot:chatbot@db:5432/chatbot
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - CHROMA_PERSIST_DIR=/app/chroma_data
+    volumes:
+      - chroma_data:/app/chroma_data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 volumes:
   postgres_data:
+  redis_data:
+  chroma_data:
 
