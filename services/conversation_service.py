@@ -43,7 +43,7 @@ class ConversationService:
         return ConversationWithHistory(
             id=conversation.id,
             title=conversation.title,
-            mode=conversation.mode,
+            mode=conversation.conversation_mode,
             created_at=conversation.created_at,
             messages=chat_history,
         )

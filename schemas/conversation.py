@@ -13,7 +13,7 @@ class ConversationMode(StrEnum):
 class ConversationCreate(BaseModel):
     model_config = ConfigDict(populate_by_name=True, from_attributes=True)
     title: str = Field(alias="conversation_title")
-    mode: ConversationMode = Field(default=ConversationMode.PLAIN)
+    conversation_mode: ConversationMode = Field(default=ConversationMode.PLAIN, alias="mode")
 
 
 class ConversationRead(BaseModel):

@@ -55,7 +55,7 @@ class TestMessageService:
         mock_rag_instance.generate_response.return_value = "RAG response!"
 
         # Create a conversation with RAG mode
-        conversation = Conversation(title="RAG Conversation", mode=ConversationMode.RAG)
+        conversation = Conversation(title="RAG Conversation", conversation_mode=ConversationMode.RAG)
         session.add(conversation)
         session.commit()
         session.refresh(conversation)
@@ -81,7 +81,7 @@ class TestMessageService:
         mock_tools_instance.generate_response.return_value = "Tools response!"
 
         # Create a conversation with tools mode
-        conversation = Conversation(title="Tools Conversation", mode=ConversationMode.TOOLS)
+        conversation = Conversation(title="Tools Conversation", conversation_mode=ConversationMode.TOOLS)
         session.add(conversation)
         session.commit()
         session.refresh(conversation)

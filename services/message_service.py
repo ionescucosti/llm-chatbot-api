@@ -38,7 +38,7 @@ class MessageService:
         chat_history = self.get_chat_history(conversation_id)
 
         # Route to the appropriate service based on conversation mode
-        ai_response_text = self._generate_response_by_mode(conversation.mode, chat_history)
+        ai_response_text = self._generate_response_by_mode(conversation.conversation_mode, chat_history)
 
         assistant_message = Message(conversation_id=conversation_id, role="assistant", content=ai_response_text)
         self.session.add(assistant_message)

@@ -17,5 +17,5 @@ class ConversationMode(StrEnum):
 class Conversation(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     title: str = Field(index=True)
-    mode: ConversationMode = Field(default=ConversationMode.PLAIN)
+    conversation_mode: ConversationMode = Field(default=ConversationMode.PLAIN)
     created_at: datetime = Field(default_factory=utc_now)
